@@ -8,16 +8,16 @@ Graphical CLI meme generator in Go — place captions on an image with your
 ```sh
 go install github.com/mganter/memegen-tui/cmd/memegen@latest  # or build locally:
 go build -o memegen ./cmd/memegen
-./memegen                              # no image → mouse-driven file browser opens
+./memegen                              # no image → launch menu (pick a source)
 ./memegen path/to/image.png            # writes path/to/image-meme.png on save
 ./memegen -o out.png path/to/image.jpg # custom output
 ```
 
-Run with no image and a file browser opens at the current directory: click a
-folder to descend, `..` to go up, click an image to open it in the editor.
+Run with no image and a launch menu opens — pick an image source with the
+mouse or `↑`/`↓` + `Enter`:
 
-The top rows open searchable browsers over online meme template catalogs:
-
+- **📁 browse local files** — a file browser at the current directory: click a
+  folder to descend, `..` to go up, click an image to open it in the editor.
 - **★ browse KnowYourMeme templates** — the
   [KnowYourMeme dataset](https://www.kaggle.com/datasets/adityaaggarwal27/knowyourmeme-memes)
   (~43k entries). Fetched from Kaggle on first use and cached; later runs reuse
@@ -77,7 +77,8 @@ Follows [golang-standards/project-layout](https://github.com/golang-standards/pr
 - `pkg/memecat/`      — source-agnostic meme catalog: Template/Catalog, title search, CSV cache.
 - `pkg/kym/`          — KnowYourMeme dataset loader: CSV parse + fetch/conditional cache.
 - `pkg/imgflip/`      — imgflip API loader: get_memes → catalog + CSV cache.
-- `internal/browser/` — mouse file picker shown when no image is passed.
+- `internal/menu/`    — launch menu choosing the image source (local / online catalogs).
+- `internal/browser/` — mouse file picker for local images.
 - `internal/templates/` — searchable browser (with live preview) over a meme catalog.
 - `internal/ui/`      — bubbletea model wiring mouse/keys to canvas ops.
 

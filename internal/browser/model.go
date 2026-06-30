@@ -22,7 +22,6 @@ type Model struct {
 	top       int // first visible entry index (scroll)
 	selected  string
 	done      bool
-	source    string // chosen online template source, if any
 	cancelled bool
 	err       string
 }
@@ -41,12 +40,6 @@ func (m Model) Selected() string { return m.selected }
 
 // Done reports an image was picked.
 func (m Model) Done() bool { return m.done }
-
-// Templates reports the user chose to open an online template browser.
-func (m Model) Templates() bool { return m.source != "" }
-
-// Source returns the chosen online template source (valid once Templates).
-func (m Model) Source() string { return m.source }
 
 // Cancelled reports the user quit without picking.
 func (m Model) Cancelled() bool { return m.cancelled }
@@ -78,10 +71,6 @@ func (m *Model) scrollToCursor() {
 
 // activate acts on the current cursor entry (Enter / click).
 func (m Model) activate() (Model, tea.Cmd) {
-	if c := m.state.Cursor; c >= 0 && c < len(m.state.Entries) && m.state.Entries[c].Source != "" {
-		m.source = m.state.Entries[c].Source
-		return m, tea.Quit
-	}
 	ns, sel, err := m.state.Enter()
 	if err != nil {
 		m.err = err.Error()
@@ -188,7 +177,7 @@ func (m Model) View() string {
 	for i := m.top; i < end; i++ {
 		e := m.state.Entries[i]
 		line := e.Name
-		if e.IsDir || e.Source != "" {
+		if e.IsDir {
 			line = dirStyle.Render(e.Name)
 		}
 		if i == m.state.Cursor {

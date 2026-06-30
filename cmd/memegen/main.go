@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mganter/memegen-tui/internal/browser"
+	"github.com/mganter/memegen-tui/internal/menu"
 	"github.com/mganter/memegen-tui/internal/templates"
 	"github.com/mganter/memegen-tui/internal/ui"
 	"github.com/mganter/memegen-tui/pkg/canvas"
@@ -38,23 +39,29 @@ func main() {
 	inPath := flag.Arg(0)
 	fromTemplate := false
 	if inPath == "" {
-		// No image given: open the file browser to pick a local file, or to
-		// dive into an online meme template browser.
-		picked, source, err := pickImage()
+		// No image given: show the launch menu to pick a source — the local file
+		// browser or an online meme template catalog.
+		source, err := pickSource()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
-		if source != "" {
+		var picked string
+		switch source {
+		case "": // cancelled
+			return
+		case menu.SourceLocal:
+			picked, err = pickLocalFile()
+		default:
 			picked, err = pickTemplate(source)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "error:", err)
-				os.Exit(1)
-			}
 			fromTemplate = true
 		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 		if picked == "" {
-			return // cancelled
+			return // cancelled within the chosen browser
 		}
 		inPath = picked
 	}
@@ -84,36 +91,46 @@ func main() {
 	}
 }
 
-// pickImage runs the file browser from the current directory. It returns the
-// chosen image path (or "" if cancelled), and the online template source the
-// user selected instead of a local file ("" when a local file was picked).
-func pickImage() (path, source string, err error) {
+// pickSource runs the launch menu and returns the chosen source, or "" if the
+// user cancelled.
+func pickSource() (string, error) {
+	res, err := tea.NewProgram(menu.New(), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	if err != nil {
+		return "", err
+	}
+	final := res.(menu.Model)
+	if final.Cancelled() || !final.Done() {
+		return "", nil
+	}
+	return final.Selected(), nil
+}
+
+// pickLocalFile runs the file browser from the current directory and returns the
+// chosen image path, or "" if the user cancelled.
+func pickLocalFile() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	bm, err := browser.New(cwd)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	res, err := tea.NewProgram(bm, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	final := res.(browser.Model)
-	if final.Templates() {
-		return "", final.Source(), nil
-	}
 	if final.Cancelled() || !final.Done() {
-		return "", "", nil
+		return "", nil
 	}
-	return final.Selected(), "", nil
+	return final.Selected(), nil
 }
 
 // loadCatalog fetches the catalog for the given online template source.
 func loadCatalog(source string) (memecat.Catalog, error) {
 	switch source {
-	case browser.SourceImgflip:
+	case menu.SourceImgflip:
 		return imgflip.Load()
 	default:
 		return kym.Load()
