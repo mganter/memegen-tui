@@ -39,8 +39,11 @@ func TestLoadFiltersAndOrders(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := names(s)
-	// parent first, then dir, then image files alphabetical; .txt excluded
-	want := []string{"..", "sub/", "a.png", "b.JPG", "d.gif"}
+	// two template-source entries first, then parent, dir, image files; .txt excluded
+	want := []string{
+		templateEntries[0].Name, templateEntries[1].Name,
+		"..", "sub/", "a.png", "b.JPG", "d.gif",
+	}
 	if len(got) != len(want) {
 		t.Fatalf("want %v got %v", want, got)
 	}
@@ -49,12 +52,15 @@ func TestLoadFiltersAndOrders(t *testing.T) {
 			t.Fatalf("at %d want %q got %q (all %v)", i, want[i], got[i], got)
 		}
 	}
+	if s.Entries[0].Source != SourceKnowYourMeme || s.Entries[1].Source != SourceImgflip {
+		t.Fatalf("first two entries should be template sources: %+v %+v", s.Entries[0], s.Entries[1])
+	}
 }
 
 func TestEnterDirLoadsIt(t *testing.T) {
 	d := setup(t)
 	s, _ := Load(d)
-	s = s.MoveTo(1) // "sub/"
+	s = s.MoveTo(3) // "sub/" (after 2 template entries, "..")
 	ns, sel, err := s.Enter()
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +76,7 @@ func TestEnterDirLoadsIt(t *testing.T) {
 func TestEnterImageSelects(t *testing.T) {
 	d := setup(t)
 	s, _ := Load(d)
-	s = s.MoveTo(2) // "a.png"
+	s = s.MoveTo(4) // "a.png" (after 2 template entries, "..", "sub/")
 	_, sel, err := s.Enter()
 	if err != nil {
 		t.Fatal(err)
@@ -83,13 +89,24 @@ func TestEnterImageSelects(t *testing.T) {
 func TestParentNavigates(t *testing.T) {
 	d := setup(t)
 	s, _ := Load(filepath.Join(d, "sub"))
-	// entry 0 is "..", entering it goes up to d
+	s = s.MoveTo(2) // entries 0,1 are template sources, 2 is ".."
 	ns, sel, err := s.Enter()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sel != "" || ns.Dir != d {
 		t.Fatalf("parent nav failed: dir=%q sel=%q", ns.Dir, sel)
+	}
+}
+
+func TestTemplateEntriesPresentAtTop(t *testing.T) {
+	d := setup(t)
+	s, _ := Load(d)
+	if len(s.Entries) < 2 || s.Entries[0].Source == "" || s.Entries[1].Source == "" {
+		t.Fatal("expected two template-source entries at the top")
+	}
+	if s.Entries[0].Path != "" || s.Entries[0].IsDir {
+		t.Fatal("template entry should be a non-dir, pathless marker")
 	}
 }
 

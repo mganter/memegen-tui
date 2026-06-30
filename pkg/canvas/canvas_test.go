@@ -52,6 +52,60 @@ func TestMoveBoxClampsToBounds(t *testing.T) {
 	}
 }
 
+func TestResizeBoxWidth(t *testing.T) {
+	m := New(base(200, 100))
+	i := m.AddBox(TextBox{X: 50, Y: 10, W: 60, H: 20})
+	m.ResizeBox(i, 30) // wider
+	if m.Boxes[i].W != 90 {
+		t.Fatalf("want W 90 got %d", m.Boxes[i].W)
+	}
+	m.ResizeBox(i, -50) // narrower
+	if m.Boxes[i].W != 40 {
+		t.Fatalf("want W 40 got %d", m.Boxes[i].W)
+	}
+}
+
+func TestResizeBoxClampsMinWidth(t *testing.T) {
+	m := New(base(200, 100))
+	i := m.AddBox(TextBox{X: 0, Y: 0, W: 60, H: 20})
+	m.ResizeBox(i, -1000)
+	if m.Boxes[i].W != minBoxWidth {
+		t.Fatalf("want clamp to min %d got %d", minBoxWidth, m.Boxes[i].W)
+	}
+}
+
+func TestResizeBoxKeepsCenter(t *testing.T) {
+	m := New(base(200, 100))
+	i := m.AddBox(TextBox{X: 70, Y: 0, W: 60, H: 20}) // center x = 100
+	m.ResizeBox(i, 40)                                // wider by 40
+	b := m.Boxes[i]
+	if b.W != 100 {
+		t.Fatalf("want W 100 got %d", b.W)
+	}
+	if b.X+b.W/2 != 100 {
+		t.Fatalf("center should stay at 100, got %d (X=%d W=%d)", b.X+b.W/2, b.X, b.W)
+	}
+}
+
+func TestResizeBoxStaysInBounds(t *testing.T) {
+	m := New(base(200, 100))
+	i := m.AddBox(TextBox{X: 150, Y: 0, W: 40, H: 20})
+	m.ResizeBox(i, 1000) // grow huge
+	b := m.Boxes[i]
+	if b.W > 200 || b.X < 0 || b.X+b.W > 200 {
+		t.Fatalf("box left image bounds: X=%d W=%d", b.X, b.W)
+	}
+}
+
+func TestResizeBoxOutOfRangeNoop(t *testing.T) {
+	m := New(base(100, 100))
+	m.AddBox(TextBox{X: 0, Y: 0, W: 30, H: 10})
+	m.ResizeBox(99, 10) // no panic, no change
+	if m.Boxes[0].W != 30 {
+		t.Fatalf("oob resize changed box: %d", m.Boxes[0].W)
+	}
+}
+
 func TestRemoveBox(t *testing.T) {
 	m := New(base(100, 100))
 	m.AddBox(TextBox{Text: "a"})

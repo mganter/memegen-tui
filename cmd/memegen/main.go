@@ -13,8 +13,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mganter/memegen-tui/internal/browser"
+	"github.com/mganter/memegen-tui/internal/templates"
 	"github.com/mganter/memegen-tui/internal/ui"
 	"github.com/mganter/memegen-tui/pkg/canvas"
+	"github.com/mganter/memegen-tui/pkg/imgflip"
+	"github.com/mganter/memegen-tui/pkg/kym"
+	"github.com/mganter/memegen-tui/pkg/memecat"
 	"github.com/mganter/memegen-tui/pkg/memeio"
 )
 
@@ -32,12 +36,22 @@ func main() {
 	}
 
 	inPath := flag.Arg(0)
+	fromTemplate := false
 	if inPath == "" {
-		// No image given: open the file browser to pick one.
-		picked, err := pickImage()
+		// No image given: open the file browser to pick a local file, or to
+		// dive into an online meme template browser.
+		picked, source, err := pickImage()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
+		}
+		if source != "" {
+			picked, err = pickTemplate(source)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			fromTemplate = true
 		}
 		if picked == "" {
 			return // cancelled
@@ -53,8 +67,13 @@ func main() {
 
 	outPath := *out
 	if outPath == "" {
-		ext := filepath.Ext(inPath)
-		outPath = strings.TrimSuffix(inPath, ext) + "-meme.png"
+		base := inPath
+		if fromTemplate {
+			// inPath is a cache file; write the meme into the current dir.
+			base = filepath.Base(inPath)
+		}
+		ext := filepath.Ext(base)
+		outPath = strings.TrimSuffix(base, ext) + "-meme.png"
 	}
 
 	model := ui.New(canvas.New(img), outPath)
@@ -65,24 +84,65 @@ func main() {
 	}
 }
 
-// pickImage runs the file browser from the current directory and returns the
-// chosen image path, or "" if the user cancelled.
-func pickImage() (string, error) {
+// pickImage runs the file browser from the current directory. It returns the
+// chosen image path (or "" if cancelled), and the online template source the
+// user selected instead of a local file ("" when a local file was picked).
+func pickImage() (path, source string, err error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	bm, err := browser.New(cwd)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	res, err := tea.NewProgram(bm, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	final := res.(browser.Model)
+	if final.Templates() {
+		return "", final.Source(), nil
+	}
+	if final.Cancelled() || !final.Done() {
+		return "", "", nil
+	}
+	return final.Selected(), "", nil
+}
+
+// loadCatalog fetches the catalog for the given online template source.
+func loadCatalog(source string) (memecat.Catalog, error) {
+	switch source {
+	case browser.SourceImgflip:
+		return imgflip.Load()
+	default:
+		return kym.Load()
+	}
+}
+
+// pickTemplate fetches the catalog for source, runs the template browser, and
+// downloads the chosen template's image to the cache, returning its local path
+// (or "" if the user cancelled).
+func pickTemplate(source string) (string, error) {
+	fmt.Fprintln(os.Stderr, "fetching meme catalog…")
+	cat, err := loadCatalog(source)
+	if err != nil {
+		return "", fmt.Errorf("load catalog: %w", err)
+	}
+	tm := templates.New(cat)
+	res, err := tea.NewProgram(tm, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	if err != nil {
+		return "", err
+	}
+	final := res.(templates.Model)
 	if final.Cancelled() || !final.Done() {
 		return "", nil
 	}
-	return final.Selected(), nil
+	sel := final.Selected()
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintln(os.Stderr, "downloading", sel.Title, "…")
+	return memeio.DownloadImage(sel.ImageURL, filepath.Join(base, "memegen", "templates"))
 }

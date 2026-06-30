@@ -52,6 +52,24 @@ func Fit(b image.Rectangle, maxCols, maxRows int) Preview {
 	}
 }
 
+// Grid builds a Preview over an explicit cols x rows cell grid (no aspect math).
+// Used for graphics rendering where the grid is chosen separately from cell
+// pixel dimensions; the cell↔pixel mapping then matches the displayed image.
+func Grid(b image.Rectangle, cols, rows int) Preview {
+	w, h := b.Dx(), b.Dy()
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return Preview{
+		Cols: cols, Rows: rows, srcW: w, srcH: h,
+		scaleX: float64(w) / float64(cols),
+		scaleY: float64(h) / float64(rows),
+	}
+}
+
 // CellToImage maps a terminal cell to the center image pixel it covers.
 func (p Preview) CellToImage(col, row int) (x, y int) {
 	x = int((float64(col) + 0.5) * p.scaleX)

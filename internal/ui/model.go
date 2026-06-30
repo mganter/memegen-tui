@@ -7,6 +7,9 @@ package ui
 
 import (
 	"fmt"
+	"image"
+	"image/color"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,6 +22,16 @@ import (
 
 const footerRows = 6
 
+// dragFrame caps how often the preview re-renders during a mouse drag (~30fps).
+const dragFrame = 33 * time.Millisecond
+
+// dragTransmitPx is the (smaller) transmitted image width while dragging, so the
+// graphics payload stays light; the full-resolution image is restored on drop.
+const dragTransmitPx = 480
+
+// selectColor outlines the selected text box in the preview (bright cyan).
+var selectColor = color.RGBA{0, 255, 255, 255}
+
 // Model is the bubbletea model for the editor.
 type Model struct {
 	meme    *canvas.Meme
@@ -27,19 +40,21 @@ type Model struct {
 	w, h  int
 	pv    preview.Preview
 	pvStr string
+	gfx   bool // terminal supports Kitty graphics (real pixels)
 
 	sel      int // selected box index, -1 = none
 	editing  bool
 	dragging bool
 	grabX    int // image-px offset from box origin to grab point
 	grabY    int
+	lastDraw time.Time // last preview render time, for drag throttling
 
 	status string
 }
 
 // New builds a Model over meme, exporting to outPath on save.
 func New(meme *canvas.Meme, outPath string) Model {
-	return Model{meme: meme, outPath: outPath, sel: -1, status: "click to add text"}
+	return Model{meme: meme, outPath: outPath, sel: -1, status: "click to add text", gfx: preview.GraphicsSupported()}
 }
 
 // Init satisfies tea.Model.
@@ -63,8 +78,36 @@ func (m *Model) refresh() {
 		m.status = "render error: " + err.Error()
 		img = m.meme.Base
 	}
-	m.pv = preview.Fit(img.Bounds(), m.w, m.previewRows())
-	m.pvStr = m.pv.Render(img)
+	// Overlay the selected box's boundary on the preview only; the saved/copied
+	// meme uses Burn directly and never carries this marker.
+	if m.sel >= 0 && m.sel < len(m.meme.Boxes) {
+		b := m.meme.Boxes[m.sel]
+		thick := img.Bounds().Dx() / 300
+		if thick < 2 {
+			thick = 2
+		}
+		img = render.Outline(img, image.Rect(b.X, b.Y, b.X+b.W, b.Y+b.H), selectColor, thick)
+	}
+	// The Kitty placeholder grid and the half-block grid both drive pv, so the
+	// cell↔pixel mapping used for mouse placement matches whatever is displayed.
+	// Kitty sizes the grid from the real cell pixel aspect (cells are not a fixed
+	// 2:1) so the image is not distorted; half-blocks sample pixels directly.
+	if m.gfx {
+		b := img.Bounds()
+		cw, ch := preview.CellPixels()
+		cols, rows := preview.KittyGrid(b.Dx(), b.Dy(), m.w, m.previewRows(), cw, ch)
+		m.pv = preview.Grid(b, cols, rows)
+		// While dragging, transmit a smaller image so each frame is cheap; the
+		// release re-renders at full resolution.
+		tx := img
+		if m.dragging {
+			tx = memeio.ScaleToFit(img, dragTransmitPx, dragTransmitPx)
+		}
+		m.pvStr = preview.KittyImageDirect(tx, cols, rows)
+	} else {
+		m.pv = preview.Fit(img.Bounds(), m.w, m.previewRows())
+		m.pvStr = m.pv.Render(img)
+	}
 }
 
 // mouseToImage converts a terminal cell to an image pixel, reporting whether the
@@ -113,6 +156,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.dragging = true
 		m.editing = false
 		m.status = "drag to move · Enter to edit"
+		m.refresh() // show the new box / selection outline immediately
 		return m, nil
 	case tea.MouseActionMotion:
 		if !m.dragging || m.sel < 0 {
@@ -124,10 +168,18 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		b := m.meme.Boxes[m.sel]
 		m.meme.MoveBox(m.sel, (ix-m.grabX)-b.X, (iy-m.grabY)-b.Y)
-		m.refresh()
+		// Throttle: motion events fire far faster than a graphics re-transmit can
+		// keep up, so cap drag re-renders. The release does a final full render.
+		if time.Since(m.lastDraw) >= dragFrame {
+			m.refresh()
+			m.lastDraw = time.Now()
+		}
 		return m, nil
 	case tea.MouseActionRelease:
-		m.dragging = false
+		if m.dragging {
+			m.dragging = false
+			m.refresh() // final, full-resolution render at the dropped position
+		}
 		return m, nil
 	}
 	return m, nil
@@ -160,6 +212,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab:
 		if n := len(m.meme.Boxes); n > 0 {
 			m.sel = (m.sel + 1) % n
+			m.refresh() // move the selection outline to the new box
 		}
 		return m, nil
 	case tea.KeyUp:
@@ -170,6 +223,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.nudge(-2, 0)
 	case tea.KeyRight:
 		return m.nudge(2, 0)
+	case tea.KeyShiftUp:
+		return m.nudge(0, -m.meme.Bounds().Dy()) // jump to top (MoveBox clamps)
+	case tea.KeyShiftDown:
+		return m.nudge(0, m.meme.Bounds().Dy()) // jump to bottom
 	case tea.KeyRunes:
 		return m.handleCommand(msg.Runes)
 	}
@@ -198,6 +255,10 @@ func (m Model) handleCommand(runes []rune) (tea.Model, tea.Cmd) {
 		return m.scaleFont(2)
 	case '-', '_':
 		return m.scaleFont(-2)
+	case '.', '>':
+		return m.resizeWidth(1)
+	case ',', '<':
+		return m.resizeWidth(-1)
 	case 's':
 		return m.save()
 	case 'c':
@@ -234,6 +295,20 @@ func (m Model) handleEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) nudge(dx, dy int) (tea.Model, tea.Cmd) {
 	if m.sel >= 0 {
 		m.meme.MoveBox(m.sel, dx, dy)
+		m.refresh()
+	}
+	return m, nil
+}
+
+// resizeWidth widens (dir>0) or narrows (dir<0) the selected box by a step
+// proportional to the image width.
+func (m Model) resizeWidth(dir int) (tea.Model, tea.Cmd) {
+	if m.sel >= 0 {
+		step := m.meme.Bounds().Dx() / 20
+		if step < 10 {
+			step = 10
+		}
+		m.meme.ResizeBox(m.sel, dir*step)
 		m.refresh()
 	}
 	return m, nil
@@ -299,7 +374,7 @@ func (m Model) View() string {
 		sel = fmt.Sprintf("#%d %q  pos(%d,%d) %dx%d  %0.fpt  [%s]",
 			m.sel, b.Text, b.X, b.Y, b.W, b.H, b.FontPt, mode)
 	}
-	help := "mouse: click=add/select drag=move · Enter edit · Tab next · +/- size · arrows nudge · d del · s save · c copy · q quit"
+	help := "mouse: click=add/select drag=move · Enter edit · Tab next · +/- size · ,/. width · arrows nudge · shift+↑/↓ top/bottom · d del · s save · c copy · q quit"
 	return fmt.Sprintf("%s\n%s\n%s\n%s",
 		titleStyle.Render("memegen — "+m.outPath),
 		m.pvStr,

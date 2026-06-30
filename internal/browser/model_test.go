@@ -29,7 +29,12 @@ func TestKeyDownMovesCursor(t *testing.T) {
 func TestEnterDirChangesDir(t *testing.T) {
 	d := setup(t)
 	m := testModel(t, d)
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown}) // to "sub/"
+	// entries: 0,1=templates 2=.. 3=sub/ — three downs to reach "sub/"
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nm.(Model)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nm.(Model)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = nm.(Model)
 	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nm.(Model)
@@ -44,14 +49,30 @@ func TestEnterDirChangesDir(t *testing.T) {
 func TestClickImageSelectsAndFinishes(t *testing.T) {
 	d := setup(t)
 	m := testModel(t, d)
-	// rows: y=0 title; list starts y=1. entries: 0=.. 1=sub/ 2=a.png
-	nm, _ := m.Update(tea.MouseMsg{X: 2, Y: 1 + 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	// rows: y=0 title; list starts y=1. entries: 0,1=templates 2=.. 3=sub/ 4=a.png
+	nm, _ := m.Update(tea.MouseMsg{X: 2, Y: 1 + 4, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	m = nm.(Model)
 	if !m.Done() {
 		t.Fatal("clicking image should finish")
 	}
 	if m.Selected() != filepath.Join(d, "a.png") {
 		t.Fatalf("want a.png got %q", m.Selected())
+	}
+}
+
+func TestClickTemplateEntrySignalsSource(t *testing.T) {
+	m := testModel(t, setup(t))
+	// click second list row (y=2) = the Imgflip template entry
+	nm, _ := m.Update(tea.MouseMsg{X: 2, Y: 2, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m = nm.(Model)
+	if !m.Templates() {
+		t.Fatal("clicking a template entry should signal templates mode")
+	}
+	if m.Source() != SourceImgflip {
+		t.Fatalf("want imgflip source got %q", m.Source())
+	}
+	if m.Done() {
+		t.Fatal("templates signal is not a file selection")
 	}
 }
 

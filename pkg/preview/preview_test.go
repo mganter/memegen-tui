@@ -45,6 +45,21 @@ func TestCellToImageStaysInBounds(t *testing.T) {
 	}
 }
 
+func TestGridBuildsExactCellGrid(t *testing.T) {
+	p := Grid(image.Rect(0, 0, 720, 709), 30, 18)
+	if p.Cols != 30 || p.Rows != 18 {
+		t.Fatalf("want 30x18 got %dx%d", p.Cols, p.Rows)
+	}
+	// cell→pixel mapping must stay in bounds and round-trip.
+	x, y := p.CellToImage(29, 17)
+	if x < 0 || x >= 720 || y < 0 || y >= 709 {
+		t.Fatalf("px out of bounds: %d,%d", x, y)
+	}
+	if c, r := p.ImageToCell(x, y); c != 29 || r != 17 {
+		t.Fatalf("roundtrip failed: got cell %d,%d", c, r)
+	}
+}
+
 func TestRenderShapeAndContent(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	for y := 0; y < 4; y++ {

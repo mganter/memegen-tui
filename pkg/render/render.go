@@ -11,6 +11,7 @@ package render
 import (
 	"image"
 	"image/color"
+	"image/draw"
 
 	"github.com/fogleman/gg"
 	"golang.org/x/image/font"
@@ -77,6 +78,32 @@ func Burn(m *canvas.Meme) (image.Image, error) {
 		dc.DrawStringWrapped(b.Text, cx, cy, ax, ay, maxW, lineSpacing, ggAlign(b.Align))
 	}
 	return dc.Image(), nil
+}
+
+// Outline returns a copy of src with a thick-pixel rectangle border drawn along
+// r in col, clamped to the image bounds. Used to mark the selected text box in
+// the preview; it does not touch the saved meme.
+func Outline(src image.Image, r image.Rectangle, col color.Color, thick int) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(b)
+	draw.Draw(dst, b, src, b.Min, draw.Src)
+	if thick < 1 {
+		thick = 1
+	}
+	r = r.Intersect(b)
+	if r.Empty() {
+		return dst
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			onBorder := x < r.Min.X+thick || x >= r.Max.X-thick ||
+				y < r.Min.Y+thick || y >= r.Max.Y-thick
+			if onBorder {
+				dst.Set(x, y, col)
+			}
+		}
+	}
+	return dst
 }
 
 func anchor(a canvas.Align) (ax, ay float64) {

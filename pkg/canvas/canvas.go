@@ -87,6 +87,30 @@ func (m *Meme) MoveBox(i, dx, dy int) {
 	b.Y = clamp(b.Y+dy, bd.Min.Y, bd.Max.Y-b.H)
 }
 
+// minBoxWidth is the smallest a text box may be shrunk to (base-image pixels).
+const minBoxWidth = 20
+
+// ResizeBox widens (dw>0) or narrows (dw<0) box i by dw pixels, anchored at its
+// center so the text stays centered. Width is clamped to at least minBoxWidth
+// and to the base image width; the box is then kept inside the image.
+func (m *Meme) ResizeBox(i, dw int) {
+	if i < 0 || i >= len(m.Boxes) {
+		return
+	}
+	bd := m.Bounds()
+	b := &m.Boxes[i]
+	cx := b.X + b.W/2
+	w := b.W + dw
+	if w < minBoxWidth {
+		w = minBoxWidth
+	}
+	if w > bd.Dx() {
+		w = bd.Dx()
+	}
+	b.W = w
+	b.X = clamp(cx-w/2, bd.Min.X, bd.Max.X-w)
+}
+
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
